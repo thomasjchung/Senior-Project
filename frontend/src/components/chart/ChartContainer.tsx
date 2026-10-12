@@ -2,14 +2,30 @@ import { useEffect, useRef } from "react";
 import {
   createChart,
   CandlestickSeries,
+  HistogramSeries,
+  LineSeries,
+  LineStyle,
   createSeriesMarkers,
   type IChartApi,
   type ISeriesApi,
   type SeriesMarker,
+  type SeriesType,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useAppStore } from "../../store/useAppStore";
-import { barsToCandles } from "../../utils/chartHelpers";
+import { barsToCandles, barsToVolume, indicatorToLine } from "../../utils/chartHelpers";
+import { bollinger, ema, macd, rsi, sma, stochastic } from "../../utils/indicators";
+
+const OVERLAY_COLORS: Record<string, string> = {
+  SMA_20: "#f59e0b",
+  SMA_50: "#a855f7",
+  EMA_20: "#06b6d4",
+  EMA_50: "#ec4899",
+};
+const BB_COLOR = "rgba(148, 163, 184, 0.8)";
+const LINE_A = "#3b82f6";
+const LINE_B = "#f59e0b";
+const GUIDE_COLOR = "rgba(148, 163, 184, 0.4)";
 
 export default function ChartContainer() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -17,8 +33,9 @@ export default function ChartContainer() {
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef = useRef<any>(null);
+  const indicatorSeriesRef = useRef<ISeriesApi<SeriesType>[]>([]);
 
-  const { bars, overlayIndicators, backtestResult } = useAppStore();
+  const { bars, overlayIndicators, subPaneIndicators, backtestResult } = useAppStore();
 
   // Mount chart once
   useEffect(() => {
@@ -62,6 +79,7 @@ export default function ChartContainer() {
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
+      indicatorSeriesRef.current = [];
       markersRef.current = null;
     };
   }, []);
@@ -73,13 +91,90 @@ export default function ChartContainer() {
     chartRef.current?.timeScale().fitContent();
   }, [bars]);
 
-  // Update overlay indicators
+  // Rebuild overlay and sub-pane indicator series
   useEffect(() => {
-    if (!chartRef.current || bars.length === 0) return;
-    // This is a simplified version — a full implementation would compute
-    // indicators client-side or fetch from backend. For now we show a placeholder.
-    // The overlay series will be populated when indicator data is available from backend.
-  }, [overlayIndicators, bars]);
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    for (const series of indicatorSeriesRef.current) chart.removeSeries(series);
+    indicatorSeriesRef.current = [];
+    for (let i = chart.panes().length - 1; i > 0; i--) chart.removePane(i);
+    if (bars.length === 0) return;
+
+    const added = indicatorSeriesRef.current;
+    const close = bars.map((b) => b.c);
+
+    const addLine = (paneIndex: number, values: number[], color: string, title = "") => {
+      const series = chart.addSeries(
+        LineSeries,
+        {
+          color,
+          lineWidth: 1,
+          title,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        },
+        paneIndex
+      );
+      series.setData(indicatorToLine(bars, values));
+      added.push(series);
+      return series;
+    };
+    const addGuides = (series: ISeriesApi<"Line">, levels: number[]) => {
+      for (const price of levels) {
+        series.createPriceLine({ price, color: GUIDE_COLOR, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false });
+      }
+    };
+
+    for (const key of overlayIndicators) {
+      const [kind, ...params] = key.split("_");
+      if (kind === "SMA") addLine(0, sma(close, Number(params[0])), OVERLAY_COLORS[key] ?? LINE_A, key);
+      else if (kind === "EMA") addLine(0, ema(close, Number(params[0])), OVERLAY_COLORS[key] ?? LINE_A, key);
+      else if (kind === "BB") {
+        const bb = bollinger(close, Number(params[0]), Number(params[1]));
+        addLine(0, bb.upper, BB_COLOR, "BB");
+        addLine(0, bb.middle, BB_COLOR);
+        addLine(0, bb.lower, BB_COLOR);
+      }
+    }
+
+    subPaneIndicators.forEach((key, i) => {
+      const pane = i + 1;
+      const [kind, ...params] = key.split("_");
+      if (kind === "RSI") {
+        addGuides(addLine(pane, rsi(close, Number(params[0])), "#a855f7", key), [70, 30]);
+      } else if (kind === "MACD") {
+        const m = macd(close, Number(params[0]), Number(params[1]), Number(params[2]));
+        const hist = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, pane);
+        hist.setData(
+          bars.flatMap((b, j) =>
+            isNaN(m.hist[j])
+              ? []
+              : [{ time: b.t as UTCTimestamp, value: m.hist[j], color: m.hist[j] >= 0 ? "rgba(34, 197, 94, 0.5)" : "rgba(239, 68, 68, 0.5)" }]
+          )
+        );
+        added.push(hist);
+        addLine(pane, m.line, LINE_A, "MACD");
+        addLine(pane, m.signal, LINE_B, "Signal");
+      } else if (kind === "VOLUME") {
+        const vol = chart.addSeries(
+          HistogramSeries,
+          { priceLineVisible: false, lastValueVisible: false, priceFormat: { type: "volume" }, title: "Volume" },
+          pane
+        );
+        vol.setData(barsToVolume(bars));
+        added.push(vol);
+      } else if (kind === "STOCH") {
+        const st = stochastic(bars.map((b) => b.h), bars.map((b) => b.l), close, Number(params[0]), Number(params[1]), Number(params[2]));
+        addGuides(addLine(pane, st.k, LINE_A, "%K"), [80, 20]);
+        addLine(pane, st.d, LINE_B, "%D");
+      }
+    });
+
+    // Give the price pane most of the height
+    chart.panes().forEach((p, i) => p.setStretchFactor(i === 0 ? 3 : 1));
+  }, [bars, overlayIndicators, subPaneIndicators]);
 
   // Update trade markers when backtest result changes
   useEffect(() => {
