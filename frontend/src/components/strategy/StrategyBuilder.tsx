@@ -6,10 +6,13 @@ import { makeBlankStrategy, type LogicKey } from "../../types/strategy";
 import ConditionGroup from "./ConditionGroup";
 import StrategyParams from "./StrategyParams";
 import StrategyList from "./StrategyList";
+import UniversePicker from "./UniversePicker";
+import MarketHistoryPanel from "../scanner/MarketHistoryPanel";
 
 export default function StrategyBuilder() {
   const {
     activeStrategy, setActiveStrategy, activeSavedId, setActiveSavedId, isRunningBacktest, backtestError,
+    backtestNeedsHistory,
   } = useAppStore();
   const createMutation = useCreateStrategy();
   const updateMutation = useUpdateStrategy();
@@ -66,6 +69,14 @@ export default function StrategyBuilder() {
           />
         </div>
 
+        <div style={{ marginBottom: "12px" }}>
+          <SectionTitle>Stocks to trade</SectionTitle>
+          <UniversePicker
+            universe={activeStrategy.universe ?? { type: "symbol" }}
+            onChange={(universe) => setActiveStrategy({ ...activeStrategy, universe })}
+          />
+        </div>
+
         <ConditionGroup
           title="Entry Conditions"
           conditions={activeStrategy.entry_conditions}
@@ -95,6 +106,7 @@ export default function StrategyBuilder() {
       <div style={{ padding: "12px", borderTop: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: "8px" }}>
         {saveError && <div style={{ color: "var(--color-red)", fontSize: "12px" }}>{saveError}</div>}
         {backtestError && <div style={{ color: "var(--color-red)", fontSize: "12px" }}>{backtestError}</div>}
+        {backtestNeedsHistory && <MarketHistoryPanel needed={backtestNeedsHistory} />}
         <button
           onClick={handleSave}
           disabled={createMutation.isPending || updateMutation.isPending}

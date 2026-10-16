@@ -1,14 +1,18 @@
 import { useState } from "react";
 import type { Trade } from "../../types/backtest";
-import { fmtDate, fmtPrice, fmtPct } from "../../utils/formatters";
+import { fmtDate, fmtDateTime, fmtPrice, fmtPct } from "../../utils/formatters";
 
 interface Props {
   trades: Trade[];
+  onOpenTrade?: (t: Trade) => void;
 }
 
-type SortKey = "entry_ts" | "pnl" | "pnl_pct" | "exit_reason";
+type SortKey = "entry_ts" | "symbol" | "pnl" | "pnl_pct" | "exit_reason";
 
-export default function TradeLog({ trades }: Props) {
+export default function TradeLog({ trades, onOpenTrade }: Props) {
+  // Scanner backtests trade many stocks within the day
+  const multiSymbol = trades.some((t) => t.symbol);
+  const fmtTime = multiSymbol ? (ts: number) => `${fmtDate(ts)} ${fmtDateTime(ts).split(" ")[1]}` : fmtDate;
   const [sortKey, setSortKey] = useState<SortKey>("entry_ts");
   const [sortAsc, setSortAsc] = useState(true);
 
@@ -22,8 +26,8 @@ export default function TradeLog({ trades }: Props) {
   }
 
   const sorted = [...trades].sort((a, b) => {
-    const av = a[sortKey] as number | string;
-    const bv = b[sortKey] as number | string;
+    const av = (a[sortKey] ?? "") as number | string;
+    const bv = (b[sortKey] ?? "") as number | string;
     const cmp = av < bv ? -1 : av > bv ? 1 : 0;
     return sortAsc ? cmp : -cmp;
   });
@@ -42,6 +46,7 @@ export default function TradeLog({ trades }: Props) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--color-border)", textAlign: "left" }}>
+            {multiSymbol && <Col label="Symbol" k="symbol" />}
             <Col label="Entry" k="entry_ts" />
             <th style={{ color: "var(--color-muted)" }}>Exit</th>
             <th style={{ color: "var(--color-muted)" }}>Dir</th>
@@ -56,13 +61,17 @@ export default function TradeLog({ trades }: Props) {
           {sorted.map((t, i) => (
             <tr
               key={i}
+              onClick={onOpenTrade && (() => onOpenTrade(t))}
+              title={onOpenTrade ? "Open in chart" : undefined}
               style={{
+                cursor: onOpenTrade ? "pointer" : undefined,
                 borderBottom: "1px solid var(--color-border)",
                 background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
               }}
             >
-              <td style={{ padding: "5px 4px" }}>{fmtDate(t.entry_ts)}</td>
-              <td style={{ padding: "5px 4px" }}>{fmtDate(t.exit_ts)}</td>
+              {multiSymbol && <td style={{ padding: "5px 4px", fontWeight: 600 }}>{t.symbol}</td>}
+              <td style={{ padding: "5px 4px" }}>{fmtTime(t.entry_ts)}</td>
+              <td style={{ padding: "5px 4px" }}>{fmtTime(t.exit_ts)}</td>
               <td style={{ padding: "5px 4px", color: t.direction === "long" ? "var(--color-green)" : "var(--color-red)", fontWeight: 600 }}>
                 {t.direction === "long" ? "L" : "S"}
               </td>

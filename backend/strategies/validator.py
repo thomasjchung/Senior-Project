@@ -1,4 +1,5 @@
 from indicators.definitions import VALID_INDICATORS, VALID_OPERATORS
+from scanner.criteria import validate_criteria
 
 
 def validate_strategy(config: dict) -> list[str]:
@@ -24,6 +25,12 @@ def validate_strategy(config: dict) -> list[str]:
         val = config.get(field_name)
         if val is not None and float(val) <= 0:
             errors.append(f"{field_name} must be positive")
+
+    universe = config.get("universe") or {"type": "symbol"}
+    if universe.get("type") not in ("symbol", "scanner"):
+        errors.append("universe.type must be 'symbol' or 'scanner'")
+    elif universe["type"] == "scanner":
+        errors.extend(f"universe.{e}" for e in validate_criteria(universe.get("criteria")))
 
     entry = config.get("entry_conditions", [])
     if not entry:

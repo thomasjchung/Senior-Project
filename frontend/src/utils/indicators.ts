@@ -3,12 +3,14 @@
 // Values that are not yet defined (warm-up period) are NaN.
 
 export function rollingMean(values: number[], length: number): number[] {
-  return values.map((_, i) => {
-    if (i < length - 1) return NaN;
-    let sum = 0;
-    for (let j = i - length + 1; j <= i; j++) sum += values[j];
-    return sum / length;
-  });
+  const out: number[] = [];
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= length) sum -= values[i - length];
+    out.push(i < length - 1 ? NaN : sum / length);
+  }
+  return out;
 }
 
 function rollingStd(values: number[], length: number): number[] {

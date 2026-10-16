@@ -84,14 +84,10 @@ def _add_indicator(df: pd.DataFrame, indicator: str, params: dict, col: str) -> 
         df[stoch_d_col] = d_line
 
     elif indicator == "VWAP":
-        # Cumulative VWAP that resets each day
-        df["_tp"] = (df["high"] + df["low"] + df["close"]) / 3
-        df["_ts_dt"] = pd.to_datetime(df["ts"], unit="s", utc=True).dt.date
-        df["VWAP"] = (
-            df.groupby("_ts_dt", group_keys=False)
-            .apply(lambda g: (g["_tp"] * g["volume"]).cumsum() / g["volume"].cumsum())
-        )
-        df.drop(columns=["_tp", "_ts_dt"], inplace=True)
+        # Cumulative VWAP that resets each (New York) trading day
+        typical_price = (df["high"] + df["low"] + df["close"]) / 3
+        day = pd.to_datetime(df["ts"], unit="s", utc=True).dt.tz_convert("America/New_York").dt.date
+        df["VWAP"] = (typical_price * df["volume"]).groupby(day).cumsum() / df["volume"].groupby(day).cumsum()
 
     elif indicator == "VOLUME_SMA":
         length = int(params.get("length", 20))

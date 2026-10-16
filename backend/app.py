@@ -4,6 +4,8 @@ from database import init_db, init_app
 from data.routes import bp as data_bp
 from strategies.routes import bp as strategies_bp
 from backtest.routes import bp as backtest_bp
+from scanner.routes import bp as scanner_bp
+from scanner.market_db import init_market_db
 
 
 def create_app():
@@ -11,11 +13,13 @@ def create_app():
     CORS(app, origins=["http://localhost:5173", "http://127.0.0.1:5173"])
 
     init_db()
+    init_market_db()
     init_app(app)
 
     app.register_blueprint(data_bp)
     app.register_blueprint(strategies_bp)
     app.register_blueprint(backtest_bp)
+    app.register_blueprint(scanner_bp)
 
     @app.get("/api/ping")
     def ping():

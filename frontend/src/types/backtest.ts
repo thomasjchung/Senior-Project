@@ -7,7 +7,8 @@ export interface Trade {
   shares: number;
   pnl: number;
   pnl_pct: number;
-  exit_reason: "signal" | "stop_loss" | "take_profit" | "end_of_data";
+  exit_reason: "signal" | "stop_loss" | "take_profit" | "end_of_data" | "end_of_day";
+  symbol?: string; // scanner backtests only
 }
 
 export interface EquityPoint {
@@ -32,4 +33,10 @@ export interface BacktestResult {
   metrics: BacktestMetrics;
   equity_curve: EquityPoint[];
   trades: Trade[];
+  universe?: {
+    candidate_days: number;
+    sessions: number;
+    symbols: number;
+    float_unknown: number;
+  };
 }

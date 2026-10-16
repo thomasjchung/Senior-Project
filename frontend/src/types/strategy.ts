@@ -11,7 +11,15 @@ export type OperatorKey =
   | "price_above_indicator" | "price_below_indicator"
   | "price_crosses_above_indicator" | "price_crosses_below_indicator";
 
+import type { ScanCriteria } from "./scanner";
+
 export type DirectionKey = "long" | "short" | "both";
+
+// Which stocks a backtest trades: the chart's symbol, or whatever met the
+// scanner criteria at each moment
+export type Universe =
+  | { type: "symbol" }
+  | { type: "scanner"; criteria: ScanCriteria; regular_hours_only: boolean };
 export type LogicKey = "AND" | "OR";
 
 export interface Condition {
@@ -30,6 +38,7 @@ export interface StrategyConfig {
   logic: LogicKey;
   entry_conditions: Condition[];
   exit_conditions: Condition[];
+  universe?: Universe; // absent in strategies saved before universes existed
 }
 
 export interface SavedStrategy {
@@ -121,5 +130,6 @@ export function makeBlankStrategy(): StrategyConfig {
     logic: "AND",
     entry_conditions: [makeBlankCondition()],
     exit_conditions: [],
+    universe: { type: "symbol" },
   };
 }

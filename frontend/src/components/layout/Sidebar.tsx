@@ -1,17 +1,19 @@
 import { useState, useRef, useEffect } from "react";
-import { useAppStore } from "../../store/useAppStore";
-import { useLoadBars } from "../../hooks/useOHLCV";
+import { useAppStore, type NewOverlay, type OverlayKind, type PriceSource } from "../../store/useAppStore";
+import { overlayTitle } from "../../utils/chartHelpers";
+import { useLoadBars, WARMUP_BARS } from "../../hooks/useOHLCV";
 import { searchSymbols } from "../../api/data";
 import { TIMEFRAMES, type Timeframe } from "../../types/ohlcv";
 import type { SymbolSearchResult } from "../../types/ohlcv";
 
-const OVERLAY_OPTIONS = [
-  { key: "SMA_20", label: "SMA (20)" },
-  { key: "SMA_50", label: "SMA (50)" },
-  { key: "EMA_20", label: "EMA (20)" },
-  { key: "EMA_50", label: "EMA (50)" },
-  { key: "BB_20_2.0", label: "Bollinger Bands" },
+const OVERLAY_KINDS: { kind: OverlayKind; label: string }[] = [
+  { kind: "SMA", label: "SMA" },
+  { kind: "EMA", label: "EMA" },
+  { kind: "BB", label: "Bollinger Bands" },
 ];
+
+// Suggested colors for new overlays, cycled by how many already exist
+const OVERLAY_PALETTE = ["#f59e0b", "#a855f7", "#06b6d4", "#ec4899", "#22c55e", "#94a3b8"];
 
 const SUBPANE_OPTIONS = [
   { key: "RSI_14", label: "RSI (14)" },
@@ -23,14 +25,21 @@ const SUBPANE_OPTIONS = [
 export default function Sidebar() {
   const {
     symbol, timeframe, startDate, endDate, isLoadingBars, barsError,
-    overlayIndicators, subPaneIndicators,
+    overlayIndicators, subPaneIndicators, drawings, loadedSymbol, removeDrawing,
     setSymbol, setTimeframe, setStartDate, setEndDate,
-    toggleOverlayIndicator, toggleSubPaneIndicator,
+    addOverlayIndicator, removeOverlayIndicator, toggleOverlayIndicator, toggleSubPaneIndicator,
   } = useAppStore();
+  const [showAddOverlay, setShowAddOverlay] = useState(false);
 
   const loadBars = useLoadBars();
 
   const [symbolInput, setSymbolInput] = useState(symbol);
+  // Follow symbol changes made elsewhere (e.g. opening a scanner result)
+  const [prevSymbol, setPrevSymbol] = useState(symbol);
+  if (symbol !== prevSymbol) {
+    setPrevSymbol(symbol);
+    setSymbolInput(symbol);
+  }
   const [suggestions, setSuggestions] = useState<SymbolSearchResult[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -165,15 +174,73 @@ export default function Sidebar() {
       </Section>
 
       <Section title="Overlays">
-        {OVERLAY_OPTIONS.map(({ key, label }) => (
-          <Checkbox
-            key={key}
-            label={label}
-            checked={overlayIndicators.includes(key)}
-            onChange={() => toggleOverlayIndicator(key)}
-          />
+        {overlayIndicators.map((o) => (
+          <div key={o.id} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <Checkbox label={overlayTitle(o)} checked={o.visible} onChange={() => toggleOverlayIndicator(o.id)} />
+            <span style={{ width: "10px", height: "10px", borderRadius: "2px", background: o.color, flexShrink: 0 }} />
+            <button
+              onClick={() => removeOverlayIndicator(o.id)}
+              title="Remove"
+              style={{ marginLeft: "auto", padding: "0 4px", background: "none", color: "var(--color-muted)", fontSize: "14px", lineHeight: 1 }}
+            >
+              ×
+            </button>
+          </div>
         ))}
+        {showAddOverlay ? (
+          <AddOverlayForm
+            defaultColor={OVERLAY_PALETTE[overlayIndicators.length % OVERLAY_PALETTE.length]}
+            onAdd={(o) => {
+              addOverlayIndicator(o);
+              setShowAddOverlay(false);
+            }}
+            onCancel={() => setShowAddOverlay(false)}
+          />
+        ) : (
+          <button onClick={() => setShowAddOverlay(true)} style={{ width: "100%", marginTop: "2px" }}>
+            + Add indicator
+          </button>
+        )}
       </Section>
+
+      {loadedSymbol && (
+        <Section title={`Lines · ${loadedSymbol}`}>
+          {drawings.filter((d) => d.symbol === loadedSymbol).length === 0 && (
+            <div style={{ fontSize: "12px", color: "var(--color-muted)" }}>Use the chart toolbar to draw lines</div>
+          )}
+          {drawings
+            .filter((d) => d.symbol === loadedSymbol)
+            .map((d) => (
+              <div key={d.id} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px" }}>
+                <span
+                  style={{
+                    width: "10px",
+                    height: "10px",
+                    borderRadius: "2px",
+                    flexShrink: 0,
+                    background:
+                      d.tool === "fib" ? "var(--color-accent)" : d.role === "support" ? "var(--color-green)" : "var(--color-red)",
+                  }}
+                />
+                {d.tool === "fib" ? "Fibonacci" : d.role === "support" ? "Support" : "Resistance"}
+                <span style={{ color: "var(--color-muted)", fontSize: "12px" }}>
+                  {d.tool === "hline"
+                    ? d.p1.price.toFixed(2)
+                    : d.tool === "fib"
+                      ? `${d.p1.price.toFixed(0)}→${d.p2.price.toFixed(0)}`
+                      : "trend"}
+                </span>
+                <button
+                  onClick={() => removeDrawing(d.id)}
+                  title="Remove"
+                  style={{ marginLeft: "auto", padding: "0 4px", background: "none", color: "var(--color-muted)", fontSize: "14px", lineHeight: 1 }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+        </Section>
+      )}
 
       <Section title="Indicators">
         {SUBPANE_OPTIONS.map(({ key, label }) => (
@@ -185,6 +252,97 @@ export default function Sidebar() {
           />
         ))}
       </Section>
+    </div>
+  );
+}
+
+function AddOverlayForm({
+  defaultColor,
+  onAdd,
+  onCancel,
+}: {
+  defaultColor: string;
+  onAdd: (o: NewOverlay) => void;
+  onCancel: () => void;
+}) {
+  const [kind, setKind] = useState<OverlayKind>("SMA");
+  const [length, setLength] = useState(20);
+  const [source, setSource] = useState<PriceSource>("close");
+  const [stdDev, setStdDev] = useState(2);
+  const [color, setColor] = useState(defaultColor);
+
+  const valid = Number.isInteger(length) && length >= 1 && length <= WARMUP_BARS && stdDev > 0;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+        padding: "8px",
+        background: "var(--color-surface2)",
+        border: "1px solid var(--color-border)",
+        borderRadius: "4px",
+      }}
+    >
+      <div>
+        <label style={labelStyle}>Type</label>
+        <select value={kind} onChange={(e) => setKind(e.target.value as OverlayKind)} style={{ width: "100%" }}>
+          {OVERLAY_KINDS.map(({ kind, label }) => (
+            <option key={kind} value={kind}>{label}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label style={labelStyle}>Period (bars)</label>
+        <input
+          type="number"
+          min={1}
+          max={WARMUP_BARS}
+          value={length}
+          onChange={(e) => setLength(Number(e.target.value))}
+          style={{ width: "100%" }}
+        />
+      </div>
+      {kind === "BB" && (
+        <div>
+          <label style={labelStyle}>Std dev</label>
+          <input
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={stdDev}
+            onChange={(e) => setStdDev(Number(e.target.value))}
+            style={{ width: "100%" }}
+          />
+        </div>
+      )}
+      <div>
+        <label style={labelStyle}>Source</label>
+        <select value={source} onChange={(e) => setSource(e.target.value as PriceSource)} style={{ width: "100%" }}>
+          <option value="close">Close</option>
+          <option value="open">Open</option>
+        </select>
+      </div>
+      <div>
+        <label style={labelStyle}>Color</label>
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          style={{ width: "100%", height: "28px", padding: "2px", cursor: "pointer" }}
+        />
+      </div>
+      <div style={{ display: "flex", gap: "6px" }}>
+        <button
+          onClick={() => onAdd({ kind, length, source, stdDev, color })}
+          disabled={!valid}
+          style={{ flex: 1, background: "var(--color-accent)", color: "#fff" }}
+        >
+          Add
+        </button>
+        <button onClick={onCancel} style={{ flex: 1 }}>Cancel</button>
+      </div>
     </div>
   );
 }

@@ -6,6 +6,8 @@ from data.loader import load_bars, BarFetchError
 from strategies.models import StrategyConfig
 from strategies.validator import validate_strategy
 from backtest.engine import run_backtest
+from backtest.universe import MarketHistoryMissing, run_universe_backtest
+from scanner.criteria import ScanCriteria
 
 bp = Blueprint("backtest", __name__, url_prefix="/api/backtest")
 
@@ -20,8 +22,8 @@ def run():
     end = body.get("end", "")
     initial_capital = float(body.get("initial_capital", 10000))
 
-    if not symbol or not start or not end:
-        return jsonify({"error": "symbol, start, and end are required"}), 400
+    if not start or not end:
+        return jsonify({"error": "start and end are required"}), 400
 
     # Resolve strategy config
     strategy_config = None
@@ -40,6 +42,24 @@ def run():
     if errors:
         return jsonify({"error": "invalid strategy", "detail": errors}), 400
 
+    strategy = StrategyConfig.from_dict(strategy_config)
+    if strategy.universe.get("type") == "scanner":
+        try:
+            result = run_universe_backtest(
+                strategy,
+                ScanCriteria.from_dict(strategy.universe.get("criteria")),
+                bool(strategy.universe.get("regular_hours_only", True)),
+                timeframe, start, end, initial_capital,
+            )
+        except MarketHistoryMissing as e:
+            return jsonify({"error": str(e), "needs_history": {"start": e.start, "end": e.end}}), 409
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify(result)
+
+    if not symbol:
+        return jsonify({"error": "symbol is required"}), 400
+
     # Fetch bars (from cache, filling any gaps from Alpaca)
     try:
         start_ts = to_ts(start)
@@ -55,7 +75,6 @@ def run():
         return jsonify({"error": "no data found for the given symbol and date range"}), 404
 
     try:
-        strategy = StrategyConfig.from_dict(strategy_config)
         result = run_backtest(strategy, bars, initial_capital, timeframe)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400

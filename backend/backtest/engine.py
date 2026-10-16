@@ -29,45 +29,85 @@ def run_backtest(strategy: StrategyConfig, bars: list[dict], initial_capital: fl
             f"Not enough bars for indicator warmup: need {warmup + 1} bars, have {len(df)}"
         )
 
-    # Simulation state
-    cash = initial_capital
-    position = None  # dict when open: {direction, entry_price, shares, entry_ts, stop_price, tp_price}
-    trades = []
+    book = Book(strategy, initial_capital)
     equity_curve = []
 
-    def open_position(direction, entry_price, bar_ts):
-        nonlocal cash, position
-        shares = (cash * strategy.position_size_pct / 100) / entry_price
+    for i in range(warmup, len(df)):
+        row = df.iloc[i]
+        prev_row = df.iloc[i - 1]
+        bar_ts = int(row["ts"])
+
+        equity_curve.append({"t": bar_ts, "equity": round(book.equity(row["close"]), 2)})
+
+        if book.check_stops(row, bar_ts):
+            continue
+
+        # Exit signal check
+        if book.position is not None and strategy.exit_conditions:
+            if evaluate_conditions(strategy.exit_conditions, strategy.logic, row, prev_row):
+                book.close(float(row["close"]), bar_ts, "signal")
+
+        # Entry signal check
+        if book.position is None:
+            if evaluate_conditions(strategy.entry_conditions, strategy.logic, row, prev_row):
+                book.open(resolve_direction(strategy), float(row["close"]), bar_ts)
+
+    # Close any open position at end of data
+    if book.position is not None:
+        last_row = df.iloc[-1]
+        book.close(float(last_row["close"]), int(last_row["ts"]), "end_of_data")
+
+    metrics = compute_metrics(book.trades, equity_curve, initial_capital, timeframe)
+
+    return {
+        "metrics": metrics,
+        "equity_curve": equity_curve,
+        "trades": book.trades,
+    }
+
+
+class Book:
+    """Cash, the single open position, and closed trades."""
+
+    def __init__(self, strategy: StrategyConfig, initial_capital: float):
+        self.strategy = strategy
+        self.cash = initial_capital
+        self.position = None  # dict when open: {direction, entry_price, shares, entry_ts, stop_price, tp_price, symbol}
+        self.trades = []
+
+    def open(self, direction: str, entry_price: float, bar_ts: int, symbol: str | None = None):
+        strategy = self.strategy
+        shares = (self.cash * strategy.position_size_pct / 100) / entry_price
         if direction == "long":
-            cash -= shares * entry_price
+            self.cash -= shares * entry_price
             stop_price = entry_price * (1 - strategy.stop_loss_pct / 100) if strategy.stop_loss_pct else None
             tp_price = entry_price * (1 + strategy.take_profit_pct / 100) if strategy.take_profit_pct else None
         else:  # short
-            cash += shares * entry_price
+            self.cash += shares * entry_price
             stop_price = entry_price * (1 + strategy.stop_loss_pct / 100) if strategy.stop_loss_pct else None
             tp_price = entry_price * (1 - strategy.take_profit_pct / 100) if strategy.take_profit_pct else None
-        position = {
+        self.position = {
             "direction": direction,
             "entry_price": entry_price,
             "shares": shares,
             "entry_ts": bar_ts,
             "stop_price": stop_price,
             "tp_price": tp_price,
+            "symbol": symbol,
         }
 
-    def close_position(exit_price, exit_ts, exit_reason):
-        nonlocal cash, position, trades
-        p = position
+    def close(self, exit_price: float, exit_ts: int, exit_reason: str):
+        p = self.position
         if p["direction"] == "long":
-            cash += p["shares"] * exit_price
+            self.cash += p["shares"] * exit_price
             pnl = (exit_price - p["entry_price"]) * p["shares"]
         else:  # short
-            cash -= p["shares"] * exit_price
+            self.cash -= p["shares"] * exit_price
             pnl = (p["entry_price"] - exit_price) * p["shares"]
 
         pnl_pct = pnl / (p["entry_price"] * p["shares"]) * 100
 
-        trades.append({
+        trade = {
             "entry_ts": p["entry_ts"],
             "exit_ts": exit_ts,
             "direction": p["direction"],
@@ -77,67 +117,44 @@ def run_backtest(strategy: StrategyConfig, bars: list[dict], initial_capital: fl
             "pnl": round(pnl, 2),
             "pnl_pct": round(pnl_pct, 2),
             "exit_reason": exit_reason,
-        })
-        position = None
+        }
+        if p["symbol"]:
+            trade["symbol"] = p["symbol"]
+        self.trades.append(trade)
+        self.position = None
 
-    def current_equity(bar_close):
-        if position is None:
-            return cash
-        if position["direction"] == "long":
-            return cash + position["shares"] * bar_close
+    def equity(self, bar_close: float) -> float:
+        p = self.position
+        if p is None:
+            return self.cash
+        if p["direction"] == "long":
+            return self.cash + p["shares"] * bar_close
         else:  # short
-            return cash - position["shares"] * (bar_close - position["entry_price"])
+            return self.cash - p["shares"] * (bar_close - p["entry_price"])
 
-    for i in range(warmup, len(df)):
-        row = df.iloc[i]
-        prev_row = df.iloc[i - 1]
-        bar_ts = int(row["ts"])
-
-        equity_curve.append({"t": bar_ts, "equity": round(current_equity(row["close"]), 2)})
-
-        # Stop-loss and take-profit checks (uses bar high/low for realistic fills)
-        if position is not None:
-            if position["direction"] == "long":
-                if position["stop_price"] and row["low"] <= position["stop_price"]:
-                    close_position(position["stop_price"], bar_ts, "stop_loss")
-                    continue
-                if position["tp_price"] and row["high"] >= position["tp_price"]:
-                    close_position(position["tp_price"], bar_ts, "take_profit")
-                    continue
-            else:  # short
-                if position["stop_price"] and row["high"] >= position["stop_price"]:
-                    close_position(position["stop_price"], bar_ts, "stop_loss")
-                    continue
-                if position["tp_price"] and row["low"] <= position["tp_price"]:
-                    close_position(position["tp_price"], bar_ts, "take_profit")
-                    continue
-
-        # Exit signal check
-        if position is not None and strategy.exit_conditions:
-            if evaluate_conditions(strategy.exit_conditions, strategy.logic, row, prev_row):
-                close_position(float(row["close"]), bar_ts, "signal")
-
-        # Entry signal check
-        if position is None:
-            if evaluate_conditions(strategy.entry_conditions, strategy.logic, row, prev_row):
-                direction = _resolve_direction(strategy)
-                open_position(direction, float(row["close"]), bar_ts)
-
-    # Close any open position at end of data
-    if position is not None:
-        last_row = df.iloc[-1]
-        close_position(float(last_row["close"]), int(last_row["ts"]), "end_of_data")
-
-    metrics = compute_metrics(trades, equity_curve, initial_capital, timeframe)
-
-    return {
-        "metrics": metrics,
-        "equity_curve": equity_curve,
-        "trades": trades,
-    }
+    def check_stops(self, row, bar_ts: int) -> bool:
+        """Stop-loss and take-profit checks (uses bar high/low for realistic fills). True if closed."""
+        p = self.position
+        if p is None:
+            return False
+        if p["direction"] == "long":
+            if p["stop_price"] and row["low"] <= p["stop_price"]:
+                self.close(p["stop_price"], bar_ts, "stop_loss")
+                return True
+            if p["tp_price"] and row["high"] >= p["tp_price"]:
+                self.close(p["tp_price"], bar_ts, "take_profit")
+                return True
+        else:  # short
+            if p["stop_price"] and row["high"] >= p["stop_price"]:
+                self.close(p["stop_price"], bar_ts, "stop_loss")
+                return True
+            if p["tp_price"] and row["low"] <= p["tp_price"]:
+                self.close(p["tp_price"], bar_ts, "take_profit")
+                return True
+        return False
 
 
-def _resolve_direction(strategy: StrategyConfig) -> str:
+def resolve_direction(strategy: StrategyConfig) -> str:
     if strategy.direction in ("long", "short"):
         return strategy.direction
     # "both" defaults to long (could be extended with a direction indicator)

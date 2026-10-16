@@ -2,6 +2,7 @@ import { useAppStore, type AppTab } from "../../store/useAppStore";
 
 const TABS: { key: AppTab; label: string }[] = [
   { key: "chart", label: "Chart" },
+  { key: "scanner", label: "Scanner" },
   { key: "strategy", label: "Strategy" },
   { key: "results", label: "Results" },
 ];

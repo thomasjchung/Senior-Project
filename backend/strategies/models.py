@@ -20,6 +20,9 @@ class StrategyConfig:
     logic: str                  # "AND" | "OR"
     entry_conditions: list[Condition]
     exit_conditions: list[Condition]
+    # {"type": "symbol"} (the chart's symbol) or
+    # {"type": "scanner", "criteria": {...}, "regular_hours_only": bool}
+    universe: dict = field(default_factory=lambda: {"type": "symbol"})
 
     @classmethod
     def from_dict(cls, d: dict) -> "StrategyConfig":
@@ -48,4 +51,5 @@ class StrategyConfig:
                 )
                 for c in d.get("exit_conditions", [])
             ],
+            universe=d.get("universe") or {"type": "symbol"},
         )
