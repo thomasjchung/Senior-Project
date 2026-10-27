@@ -68,6 +68,7 @@ interface AppState {
 
   // Backtest result
   backtestResult: BacktestResult | null;
+  activeRunId: number | null; // run shown in the Results tab
   isRunningBacktest: boolean;
   backtestError: string | null;
   // Set when a scanner backtest needs market history that isn't downloaded
@@ -99,6 +100,7 @@ interface AppState {
   setActiveSavedId: (id: number | null) => void;
 
   setBacktestResult: (r: BacktestResult | null) => void;
+  setActiveRunId: (id: number | null) => void;
   setRunningBacktest: (v: boolean) => void;
   setBacktestError: (e: string | null) => void;
   setBacktestNeedsHistory: (n: NeedsHistory | null) => void;
@@ -132,6 +134,7 @@ export const useAppStore = create<AppState>((set) => ({
   activeSavedId: null,
 
   backtestResult: null,
+  activeRunId: null,
   isRunningBacktest: false,
   backtestError: null,
   backtestNeedsHistory: null,
@@ -170,6 +173,7 @@ export const useAppStore = create<AppState>((set) => ({
   setActiveSavedId: (id) => set({ activeSavedId: id }),
 
   setBacktestResult: (r) => set({ backtestResult: r }),
+  setActiveRunId: (id) => set({ activeRunId: id }),
   setRunningBacktest: (v) => set({ isRunningBacktest: v }),
   setBacktestError: (e) => set({ backtestError: e }),
   setBacktestNeedsHistory: (n) => set({ backtestNeedsHistory: n }),

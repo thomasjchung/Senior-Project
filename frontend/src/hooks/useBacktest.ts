@@ -1,15 +1,18 @@
 import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { runBacktest } from "../api/backtest";
 import { ApiError } from "../api/client";
 import type { NeedsHistory } from "../types/scanner";
 import { useAppStore } from "../store/useAppStore";
+import { RUNS_KEY } from "./useBacktestRuns";
 
 export function useRunBacktest() {
   const {
     symbol, timeframe, startDate, endDate,
     activeStrategy, activeSavedId,
-    setBacktestResult, setRunningBacktest, setBacktestError, setBacktestNeedsHistory, setActiveTab,
+    setBacktestResult, setActiveRunId, setRunningBacktest, setBacktestError, setBacktestNeedsHistory, setActiveTab,
   } = useAppStore();
+  const qc = useQueryClient();
 
   return useCallback(async () => {
     setRunningBacktest(true);
@@ -22,9 +25,13 @@ export function useRunBacktest() {
         start: startDate,
         end: endDate,
         initial_capital: 10000,
-        ...(activeSavedId ? { strategy_id: activeSavedId } : { config: activeStrategy }),
+        config: activeStrategy, // includes unsaved edits
+        ...(activeSavedId ? { strategy_id: activeSavedId } : {}),
       });
       setBacktestResult(result);
+      // Every run is saved; show it in the Results history
+      setActiveRunId(result.run_id ?? null);
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
       setActiveTab("results");
     } catch (e: unknown) {
       setBacktestError(e instanceof Error ? e.message : "Backtest failed");
@@ -33,5 +40,5 @@ export function useRunBacktest() {
       setRunningBacktest(false);
     }
   }, [symbol, timeframe, startDate, endDate, activeStrategy, activeSavedId,
-    setBacktestResult, setRunningBacktest, setBacktestError, setBacktestNeedsHistory, setActiveTab]);
+    setBacktestResult, setActiveRunId, setRunningBacktest, setBacktestError, setBacktestNeedsHistory, setActiveTab, qc]);
 }

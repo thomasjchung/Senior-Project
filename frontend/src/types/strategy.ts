@@ -22,6 +22,40 @@ export type Universe =
   | { type: "scanner"; criteria: ScanCriteria; regular_hours_only: boolean };
 export type LogicKey = "AND" | "OR";
 
+// Pattern rules: long setups checked on completed candles (see types/rules.ts)
+export type RuleType =
+  | "pullback" | "green_volume" | "holds_above" | "no_topping_tail"
+  | "breakout" | "volume_spike" | "candle_pattern" | "line_bounce" | "support_bounce";
+
+export interface PatternRule {
+  type: RuleType;
+  params: Record<string, number | string>;
+}
+
+// When the trade is entered once the signal candle has all conditions and rules
+export type EntryTrigger = "close" | "break_high" | "confirmed_break";
+export type StopType = "percent" | "pullback_low" | "signal_low";
+
+export const ENTRY_TRIGGERS: { value: EntryTrigger; label: string; help: string }[] = [
+  { value: "close", label: "At the signal candle's close", help: "Buys at the close of the candle where everything lines up." },
+  {
+    value: "break_high",
+    label: "Break of the signal candle's high",
+    help: "Waits for the next candle to trade above the signal candle's high and buys there (or at the open if it gaps above).",
+  },
+  {
+    value: "confirmed_break",
+    label: "Confirmation candle, then break of its high",
+    help: "The signal candle must close above the previous candle's high; then buys when the next candle breaks the signal candle's high.",
+  },
+];
+
+export const STOP_TYPES: { value: StopType; label: string }[] = [
+  { value: "percent", label: "Fixed % below entry" },
+  { value: "pullback_low", label: "Pullback low (needs a pullback rule)" },
+  { value: "signal_low", label: "Low of the signal candle" },
+];
+
 export interface Condition {
   indicator: IndicatorKey;
   params: Record<string, number>;
@@ -38,7 +72,15 @@ export interface StrategyConfig {
   logic: LogicKey;
   entry_conditions: Condition[];
   exit_conditions: Condition[];
-  universe?: Universe; // absent in strategies saved before universes existed
+  // The fields below are absent in strategies saved before they existed
+  universe?: Universe;
+  style?: string; // id of the style template it was started from
+  entry_rules?: PatternRule[];
+  entry_trigger?: EntryTrigger;
+  stop_type?: StopType;
+  reward_risk?: number | null; // take profit at N× the risk; overrides take_profit_pct
+  exit_end_of_day?: boolean;
+  max_risk_pct?: number | null; // skip setups whose stop is further than this below entry
 }
 
 export interface SavedStrategy {
@@ -131,5 +173,19 @@ export function makeBlankStrategy(): StrategyConfig {
     entry_conditions: [makeBlankCondition()],
     exit_conditions: [],
     universe: { type: "symbol" },
+    entry_rules: [],
+    entry_trigger: "close",
+    stop_type: "percent",
+    reward_risk: null,
+    exit_end_of_day: false,
   };
+}
+
+// Pattern rules, breakout entries and setup stops describe long setups
+export function isLongOnly(config: StrategyConfig): boolean {
+  return (
+    (config.entry_rules?.length ?? 0) > 0 ||
+    (config.entry_trigger ?? "close") !== "close" ||
+    (config.stop_type ?? "percent") !== "percent"
+  );
 }

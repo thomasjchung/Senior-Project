@@ -1,7 +1,7 @@
 import { useStrategies, useDeleteStrategy } from "../../hooks/useStrategies";
 import { useAppStore } from "../../store/useAppStore";
 
-export default function StrategyList() {
+export default function StrategyList({ onSelect }: { onSelect?: () => void }) {
   const { data: strategies, isLoading } = useStrategies();
   const deleteMutation = useDeleteStrategy();
   const { activeSavedId, setActiveStrategy, setActiveSavedId } = useAppStore();
@@ -27,6 +27,7 @@ export default function StrategyList() {
           onClick={() => {
             setActiveStrategy(s.config);
             setActiveSavedId(s.id);
+            onSelect?.();
           }}
         >
           <span style={{ fontWeight: activeSavedId === s.id ? 600 : 400 }}>{s.name}</span>

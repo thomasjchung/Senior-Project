@@ -1,4 +1,4 @@
-import type { StrategyConfig, DirectionKey } from "../../types/strategy";
+import { isLongOnly, type StrategyConfig, type DirectionKey } from "../../types/strategy";
 
 interface Props {
   config: StrategyConfig;
@@ -9,12 +9,15 @@ export default function StrategyParams({ config, onChange }: Props) {
   function set(field: keyof StrategyConfig, val: unknown) {
     onChange({ ...config, [field]: val });
   }
+  const longOnly = isLongOnly(config);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
       <FieldRow label="Direction">
         <select
-          value={config.direction}
+          value={longOnly ? "long" : config.direction}
+          disabled={longOnly}
+          title={longOnly ? "Pattern rules, breakout entries and setup stops are long-only" : undefined}
           onChange={(e) => set("direction", e.target.value as DirectionKey)}
           style={{ width: "100%" }}
         >
@@ -31,30 +34,6 @@ export default function StrategyParams({ config, onChange }: Props) {
           min={1}
           max={100}
           onChange={(e) => set("position_size_pct", Number(e.target.value))}
-          style={{ width: "100%" }}
-        />
-      </FieldRow>
-
-      <FieldRow label="Stop-loss (%)">
-        <input
-          type="number"
-          value={config.stop_loss_pct ?? ""}
-          min={0}
-          step="0.5"
-          placeholder="None"
-          onChange={(e) => set("stop_loss_pct", e.target.value ? Number(e.target.value) : null)}
-          style={{ width: "100%" }}
-        />
-      </FieldRow>
-
-      <FieldRow label="Take-profit (%)">
-        <input
-          type="number"
-          value={config.take_profit_pct ?? ""}
-          min={0}
-          step="0.5"
-          placeholder="None"
-          onChange={(e) => set("take_profit_pct", e.target.value ? Number(e.target.value) : null)}
           style={{ width: "100%" }}
         />
       </FieldRow>

@@ -12,6 +12,7 @@ type SortKey = "entry_ts" | "symbol" | "pnl" | "pnl_pct" | "exit_reason";
 export default function TradeLog({ trades, onOpenTrade }: Props) {
   // Scanner backtests trade many stocks within the day
   const multiSymbol = trades.some((t) => t.symbol);
+  const showR = trades.some((t) => t.r_multiple != null);
   const fmtTime = multiSymbol ? (ts: number) => `${fmtDate(ts)} ${fmtDateTime(ts).split(" ")[1]}` : fmtDate;
   const [sortKey, setSortKey] = useState<SortKey>("entry_ts");
   const [sortAsc, setSortAsc] = useState(true);
@@ -54,6 +55,7 @@ export default function TradeLog({ trades, onOpenTrade }: Props) {
             <th style={{ color: "var(--color-muted)" }}>Exit $</th>
             <Col label="P&L" k="pnl" />
             <Col label="P&L %" k="pnl_pct" />
+            {showR && <th style={{ color: "var(--color-muted)" }} title="Result in multiples of the risk (entry to stop)">R</th>}
             <Col label="Reason" k="exit_reason" />
           </tr>
         </thead>
@@ -83,6 +85,11 @@ export default function TradeLog({ trades, onOpenTrade }: Props) {
               <td style={{ padding: "5px 4px", color: t.pnl_pct >= 0 ? "var(--color-green)" : "var(--color-red)" }}>
                 {fmtPct(t.pnl_pct)}
               </td>
+              {showR && (
+                <td style={{ padding: "5px 4px", color: (t.r_multiple ?? 0) >= 0 ? "var(--color-green)" : "var(--color-red)" }}>
+                  {t.r_multiple != null ? `${t.r_multiple >= 0 ? "+" : ""}${t.r_multiple.toFixed(2)}R` : "—"}
+                </td>
+              )}
               <td style={{ padding: "5px 4px", color: "var(--color-muted)", fontSize: "11px" }}>
                 {t.exit_reason}
               </td>

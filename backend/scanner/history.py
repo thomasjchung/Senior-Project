@@ -62,6 +62,40 @@ def missing_months(start_day: str, end_day: str) -> list[tuple[str, str, str]]:
     return out
 
 
+def _fmt(day: str) -> str:
+    d = date.fromisoformat(day)
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def missing_history_message(start_day: str, end_day: str, avg_days: int) -> str | None:
+    """
+    None if [start_day, end_day] plus the volume-average lookback is downloaded;
+    otherwise an explanation, including the earliest start the current history allows.
+    """
+    needed_from = lookback_start(start_day, avg_days)
+    if not missing_months(needed_from, end_day):
+        return None
+    msg = (
+        f"Relative volume compares each day with the previous {avg_days} trading days, so starting on "
+        f"{_fmt(start_day)} needs market history back to {_fmt(needed_from)}."
+    )
+    # Earliest start whose lookback lies inside the downloaded months running up to end_day
+    with closing(connect()) as conn:
+        synced = {r["month"] for r in conn.execute("SELECT month FROM synced_months")}
+    months = _months(needed_from, end_day)
+    covered_from = None
+    for month, _, _ in reversed(months):
+        if month not in synced:
+            break
+        covered_from = f"{month}-01"
+    if covered_from:
+        earliest = (date.fromisoformat(covered_from) + timedelta(days=int(avg_days * 1.5) + 10)).isoformat()
+        if earliest <= end_day and not missing_months(lookback_start(earliest, avg_days), end_day):
+            msg += f" Download it below, or start on {_fmt(earliest)} or later to use what's downloaded."
+            return msg
+    return msg + " Download it below."
+
+
 def coverage() -> dict:
     with closing(connect()) as conn:
         rows = conn.execute("SELECT month, through_day FROM synced_months ORDER BY month").fetchall()

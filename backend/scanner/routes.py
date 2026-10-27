@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from scanner import history
 from scanner.criteria import ScanCriteria, validate_criteria
-from scanner.history import lookback_start, missing_months
+from scanner.history import lookback_start, missing_history_message
 from scanner.scan import historical_scan, live_scan
 
 bp = Blueprint("scanner", __name__, url_prefix="/api/scanner")
@@ -43,11 +43,11 @@ def historical():
     except ValueError:
         return jsonify({"error": "date must be YYYY-MM-DD"}), 400
 
-    needed_from = lookback_start(day, criteria.avg_volume_days)
-    if missing_months(needed_from, day):
+    message = missing_history_message(day, day, criteria.avg_volume_days)
+    if message:
         return jsonify({
-            "error": f"Market history for {needed_from} to {day} hasn't been downloaded yet",
-            "needs_history": {"start": needed_from, "end": day},
+            "error": message,
+            "needs_history": {"start": lookback_start(day, criteria.avg_volume_days), "end": day},
         }), 409
     try:
         return jsonify(historical_scan(criteria, day))

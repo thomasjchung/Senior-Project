@@ -1,73 +1,50 @@
+from functools import reduce
+
 import pandas as pd
 from indicators.definitions import make_col_name
 
 
-def evaluate_conditions(conditions: list, logic: str, row: pd.Series, prev_row: pd.Series) -> bool:
+def conditions_mask(df: pd.DataFrame, conditions: list, logic: str) -> pd.Series:
     """
-    Evaluate a list of conditions against a bar row.
-    Returns True if conditions pass according to logic (AND/OR).
+    Evaluate conditions on every bar at once.
+    True where the conditions pass according to logic (AND/OR); False with no conditions.
     """
     if not conditions:
-        return False
+        return pd.Series(False, index=df.index)
 
+    price = df["close"].astype(float)
+    prev_price = price.shift(1)
     results = []
     for cond in conditions:
-        col = make_col_name(cond.indicator, cond.params)
-        curr_val = row.get(col)
-        prev_val = prev_row.get(col) if prev_row is not None else None
-        price = row.get("close")
-        prev_price = prev_row.get("close") if prev_row is not None else None
-        threshold = cond.value
-
-        if pd.isna(curr_val):
-            results.append(False)
-            continue
+        curr = df[make_col_name(cond.indicator, cond.params)].astype(float)
+        prev = curr.shift(1)
+        threshold = float(cond.value) if cond.value is not None else float("nan")
 
         op = cond.operator
-        try:
-            if op == ">":
-                result = float(curr_val) > float(threshold)
-            elif op == ">=":
-                result = float(curr_val) >= float(threshold)
-            elif op == "<":
-                result = float(curr_val) < float(threshold)
-            elif op == "<=":
-                result = float(curr_val) <= float(threshold)
-            elif op == "crosses_above":
-                result = (
-                    prev_val is not None and not pd.isna(prev_val)
-                    and float(prev_val) <= float(threshold)
-                    and float(curr_val) > float(threshold)
-                )
-            elif op == "crosses_below":
-                result = (
-                    prev_val is not None and not pd.isna(prev_val)
-                    and float(prev_val) >= float(threshold)
-                    and float(curr_val) < float(threshold)
-                )
-            elif op == "price_above_indicator":
-                result = float(price) > float(curr_val)
-            elif op == "price_below_indicator":
-                result = float(price) < float(curr_val)
-            elif op == "price_crosses_above_indicator":
-                result = (
-                    prev_price is not None and prev_val is not None
-                    and not pd.isna(prev_val)
-                    and float(prev_price) <= float(prev_val)
-                    and float(price) > float(curr_val)
-                )
-            elif op == "price_crosses_below_indicator":
-                result = (
-                    prev_price is not None and prev_val is not None
-                    and not pd.isna(prev_val)
-                    and float(prev_price) >= float(prev_val)
-                    and float(price) < float(curr_val)
-                )
-            else:
-                result = False
-        except (TypeError, ValueError):
-            result = False
+        if op == ">":
+            result = curr > threshold
+        elif op == ">=":
+            result = curr >= threshold
+        elif op == "<":
+            result = curr < threshold
+        elif op == "<=":
+            result = curr <= threshold
+        elif op == "crosses_above":
+            result = (prev <= threshold) & (curr > threshold)
+        elif op == "crosses_below":
+            result = (prev >= threshold) & (curr < threshold)
+        elif op == "price_above_indicator":
+            result = price > curr
+        elif op == "price_below_indicator":
+            result = price < curr
+        elif op == "price_crosses_above_indicator":
+            result = (prev_price <= prev) & (price > curr)
+        elif op == "price_crosses_below_indicator":
+            result = (prev_price >= prev) & (price < curr)
+        else:
+            result = pd.Series(False, index=df.index)
 
-        results.append(result)
+        # Comparisons with NaN (indicator warm-up) are already False
+        results.append(result & curr.notna())
 
-    return all(results) if logic == "AND" else any(results)
+    return reduce(lambda a, b: a & b, results) if logic == "AND" else reduce(lambda a, b: a | b, results)

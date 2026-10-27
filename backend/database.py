@@ -41,15 +41,22 @@ CREATE TABLE IF NOT EXISTS strategies (
     updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
-CREATE TABLE IF NOT EXISTS backtest_results (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    strategy_id INTEGER REFERENCES strategies(id) ON DELETE CASCADE,
-    symbol      TEXT    NOT NULL,
-    timeframe   TEXT    NOT NULL,
-    start_ts    INTEGER NOT NULL,
-    end_ts      INTEGER NOT NULL,
-    result_json TEXT    NOT NULL,
-    ran_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+-- Every backtest run, with the exact settings used, so results can be reviewed later.
+-- strategy_id is informational: runs outlive the saved strategy they came from.
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL,
+    strategy_id     INTEGER,
+    symbol          TEXT,               -- NULL for scanner-universe runs
+    timeframe       TEXT    NOT NULL,
+    start_date      TEXT    NOT NULL,
+    end_date        TEXT    NOT NULL,
+    initial_capital REAL    NOT NULL,
+    config_json     TEXT    NOT NULL,
+    metrics_json    TEXT    NOT NULL,   -- copy of result.metrics, so listing runs skips the big result
+    result_json     TEXT    NOT NULL,
+    notes           TEXT    NOT NULL DEFAULT '',
+    ran_at          INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 """
 

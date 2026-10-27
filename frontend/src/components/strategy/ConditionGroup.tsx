@@ -7,9 +7,10 @@ interface Props {
   logic: LogicKey;
   onLogicChange: (l: LogicKey) => void;
   onChange: (conditions: Condition[]) => void;
+  emptyText?: string;
 }
 
-export default function ConditionGroup({ title, conditions, logic, onLogicChange, onChange }: Props) {
+export default function ConditionGroup({ title, conditions, logic, onLogicChange, onChange, emptyText }: Props) {
   function update(i: number, c: Condition) {
     const next = [...conditions];
     next[i] = c;
@@ -25,7 +26,7 @@ export default function ConditionGroup({ title, conditions, logic, onLogicChange
   }
 
   return (
-    <div style={{ marginBottom: "12px" }}>
+    <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
         <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
           {title}
@@ -51,7 +52,7 @@ export default function ConditionGroup({ title, conditions, logic, onLogicChange
       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
         {conditions.length === 0 && (
           <div style={{ fontSize: "12px", color: "var(--color-muted)", fontStyle: "italic" }}>
-            No conditions — position will only use stop-loss/take-profit
+            {emptyText ?? "No conditions — position will only use stop-loss/take-profit"}
           </div>
         )}
         {conditions.map((cond, i) => (

@@ -15,8 +15,6 @@ from alpaca.data.historical.screener import ScreenerClient
 from alpaca.data.requests import MarketMoversRequest, StockBarsRequest, StockSnapshotRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import AssetClass, AssetExchange, AssetStatus
-from alpaca.trading.requests import GetAssetsRequest
 
 from config import config
 from data.alpaca_client import TIMEFRAME_MAP, get_client
@@ -64,12 +62,15 @@ def refresh_assets(conn, max_age_s: int = 24 * 3600) -> None:
 
     client = _trading_client()
     rows = {}
-    # Inactive first so a reused ticker ends up described by its active asset
-    for status, active in ((AssetStatus.INACTIVE, 0), (AssetStatus.ACTIVE, 1)):
-        for a in client.get_all_assets(GetAssetsRequest(asset_class=AssetClass.US_EQUITY, status=status)):
-            if a.exchange == AssetExchange.OTC or not _TICKER.match(a.symbol) or _DERIVATIVE_NAME.search(a.name or ""):
+    # Inactive first so a reused ticker ends up described by its active asset.
+    # Raw JSON rather than alpaca-py's Asset model: its exchange enum rejects
+    # exchanges newer than the library (e.g. TXSE), failing the whole list.
+    for status, active in (("inactive", 0), ("active", 1)):
+        for a in client.get("/assets", {"asset_class": "us_equity", "status": status}):
+            symbol, name, exchange = a.get("symbol", ""), a.get("name") or "", a.get("exchange") or ""
+            if exchange == "OTC" or not _TICKER.match(symbol) or _DERIVATIVE_NAME.search(name):
                 continue
-            rows[a.symbol] = (a.symbol, a.name, str(a.exchange.value), active)
+            rows[symbol] = (symbol, name, exchange, active)
 
     conn.execute("DELETE FROM assets")
     conn.executemany("INSERT INTO assets (symbol, name, exchange, active) VALUES (?, ?, ?, ?)", rows.values())

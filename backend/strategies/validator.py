@@ -1,4 +1,5 @@
 from indicators.definitions import VALID_INDICATORS, VALID_OPERATORS
+from backtest.setups import STOP_TYPES, TRIGGERS, validate_rules
 from scanner.criteria import validate_criteria
 
 
@@ -21,7 +22,7 @@ def validate_strategy(config: dict) -> list[str]:
     if size is not None and (float(size) <= 0 or float(size) > 100):
         errors.append("position_size_pct must be between 0 and 100")
 
-    for field_name in ("stop_loss_pct", "take_profit_pct"):
+    for field_name in ("stop_loss_pct", "take_profit_pct", "max_risk_pct"):
         val = config.get(field_name)
         if val is not None and float(val) <= 0:
             errors.append(f"{field_name} must be positive")
@@ -32,9 +33,28 @@ def validate_strategy(config: dict) -> list[str]:
     elif universe["type"] == "scanner":
         errors.extend(f"universe.{e}" for e in validate_criteria(universe.get("criteria")))
 
+    rules = config.get("entry_rules") or []
+    errors.extend(validate_rules(rules))
+    trigger = config.get("entry_trigger") or "close"
+    if trigger not in TRIGGERS:
+        errors.append(f"entry_trigger must be one of {sorted(TRIGGERS)}")
+    stop_type = config.get("stop_type") or "percent"
+    if stop_type not in STOP_TYPES:
+        errors.append(f"stop_type must be one of {sorted(STOP_TYPES)}")
+    if stop_type == "pullback_low" and not any(isinstance(r, dict) and r.get("type") == "pullback" for r in rules):
+        errors.append("a pullback-low stop needs a pullback rule")
+    rr = config.get("reward_risk")
+    if rr is not None and float(rr) <= 0:
+        errors.append("reward_risk must be positive")
+    if rr and stop_type == "percent" and not config.get("stop_loss_pct"):
+        errors.append("a reward:risk take profit needs a stop-loss to measure the risk")
+    # Pattern rules, breakout triggers and setup-based stops describe long setups
+    if direction != "long" and (rules or trigger != "close" or stop_type != "percent"):
+        errors.append("pattern rules, breakout entries and setup stops are long-only; set direction to Long")
+
     entry = config.get("entry_conditions", [])
-    if not entry:
-        errors.append("at least one entry_condition is required")
+    if not entry and not rules:
+        errors.append("at least one entry condition or pattern rule is required")
 
     for i, cond in enumerate(entry + config.get("exit_conditions", [])):
         prefix = f"condition[{i}]"

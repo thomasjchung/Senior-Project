@@ -20,7 +20,10 @@ const client = axios.create({
 client.interceptors.response.use(
   (res) => res,
   (err) => {
-    const msg = err.response?.data?.error ?? err.message ?? "Unknown error";
+    const data = err.response?.data;
+    let msg = data?.error ?? err.message ?? "Unknown error";
+    // Validation errors list what's wrong in `detail`
+    if (Array.isArray(data?.detail) && data.detail.length) msg += `: ${data.detail.join("; ")}`;
     return Promise.reject(new ApiError(msg, err.response?.status, err.response?.data));
   }
 );

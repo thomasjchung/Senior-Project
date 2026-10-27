@@ -18,13 +18,14 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from backtest.engine import Book, resolve_direction
-from backtest.evaluator import evaluate_conditions
+from backtest.engine import Book
+from backtest.evaluator import conditions_mask
 from backtest.metrics import compute_metrics
+from backtest.setups import add_entry_columns
 from indicators.calculator import compute_indicators
 from scanner.criteria import ScanCriteria
 from scanner.floats import get_floats
-from scanner.history import daily_metrics, lookback_start, missing_months, trading_days
+from scanner.history import daily_metrics, lookback_start, missing_history_message, trading_days
 from scanner.intraday import load_intraday
 
 ET = ZoneInfo("America/New_York")
@@ -33,8 +34,8 @@ MAX_CANDIDATE_DAYS = 3000
 
 
 class MarketHistoryMissing(Exception):
-    def __init__(self, start: str, end: str):
-        super().__init__(f"Market history for {start} to {end} hasn't been downloaded yet")
+    def __init__(self, start: str, end: str, message: str):
+        super().__init__(message)
         self.start = start
         self.end = end
 
@@ -93,9 +94,9 @@ def run_universe_backtest(strategy, criteria: ScanCriteria, regular_hours_only: 
     if timeframe not in INTRADAY_TIMEFRAMES:
         raise ValueError("Scanner backtests need an intraday timeframe (1Min, 5Min, 15Min or 1Hour)")
 
-    needed_from = lookback_start(start, criteria.avg_volume_days)
-    if missing_months(needed_from, end):
-        raise MarketHistoryMissing(needed_from, end)
+    message = missing_history_message(start, end, criteria.avg_volume_days)
+    if message:
+        raise MarketHistoryMissing(lookback_start(start, criteria.avg_volume_days), end, message)
 
     cands = _candidate_days(criteria, start, end)
     floats = {}
@@ -119,6 +120,9 @@ def run_universe_backtest(strategy, criteria: ScanCriteria, regular_hours_only: 
             continue
         df = compute_indicators(df, [{"indicator": x.indicator, "params": x.params} for x in conditions])
         df = _gate(df, c.day, c.prev_close, c.avg_volume, criteria, regular_hours_only)
+        # Signal candles must be scanner matches; a breakout entry fills on the candle after
+        df = add_entry_columns(df, strategy, gate=df["qualifies"])
+        df["exit_signal"] = conditions_mask(df, strategy.exit_conditions, strategy.logic)
         tradable = np.flatnonzero(df["tradable"].to_numpy())
         if len(tradable) < 2:
             continue
@@ -136,26 +140,28 @@ def run_universe_backtest(strategy, criteria: ScanCriteria, regular_hours_only: 
 
     for ts, _, k, i in events:
         s = sessions[k]
-        row, prev_row = s["rows"][i], s["rows"][i - 1] if i > 0 else None
+        row = s["rows"][i]
         last_bar = i == s["tradable"][-1]
 
         if held == k:
             stopped = book.check_stops(row, ts)
             if not stopped:
-                if strategy.exit_conditions and evaluate_conditions(strategy.exit_conditions, strategy.logic, row, prev_row):
+                if row["exit_signal"]:
                     book.close(float(row["close"]), ts, "signal")
                 elif last_bar:
                     book.close(float(row["close"]), ts, "end_of_day")
             if book.position is None:
                 held = None
                 equity_by_day[s["day"]] = book.cash  # cash only changes when a position closes
-            if stopped:
+            if stopped or (book.position is None and strategy.entry_trigger != "close"):
                 continue
 
-        if book.position is None and not last_bar and row["qualifies"]:
-            if evaluate_conditions(strategy.entry_conditions, strategy.logic, row, prev_row):
-                book.open(resolve_direction(strategy), float(row["close"]), ts, symbol=s["symbol"])
+        if book.position is None and not last_bar and row["enter"]:
+            if book.enter(row, ts, symbol=s["symbol"]):
                 held = k
+                if book.position is None:  # stopped out on the entry candle
+                    held = None
+                    equity_by_day[s["day"]] = book.cash
 
     # Daily equity (every position is flat by each day's close)
     equity_curve = []
